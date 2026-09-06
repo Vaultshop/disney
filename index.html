@@ -529,10 +529,10 @@
       </div>
 
       <div class="admin-info">
-        <strong> Kaip tai veikia:</strong>
+        <strong>📝 Kaip tai veikia:</strong>
         1. Įvesk naują kainą ir spausk "Atnaujinti"<br>
         2. Sistema automatiškai atnaujins failą GitHub<br>
-        3. Vercel automatiškai perdeploy'ins (1-2 min)<br>
+        3. GitHub Pages atnaujins svetainę (1-2 min)<br>
         4. Visi pamatys naują kainą po 20s auto-reload
       </div>
 
@@ -545,18 +545,14 @@
 
 <script>
 // ==========================================
-// ⚙️ KONFIGRACIJA
+// ⚙️ KONFIGŪRACIJA
 // ==========================================
-const GITHUB_CONFIG = {
-  owner: 'vaultshop',
-  repo: 'disney',
-  path: 'index.html',
-  branch: 'main'
-};
-
 let BASE_PRICE = 39.0;
 const AUTO_RELOAD_SECONDS = 20;
 const ADMIN_CODE = 'Loginhejfrfrgrgr';
+const GITHUB_TOKEN = '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';
+const GITHUB_OWNER = 'vaultshop';
+const GITHUB_REPO = 'disney';
 // ==========================================
 
 // ===== AUTO RELOAD =====
@@ -712,7 +708,7 @@ setInterval(updateChart, 300);
 
 // ===== ŽINUTĖS =====
 const DEFAULT_MSG = {
-  text: '📊 mc.craftmc.lt serveryje veikia botas, kuris skaičiuoja žaidėjų /baltop 💰 ir klanų /f top 🏆 statistiką. Pagal šiuos duomenis automatiškai reguliuojama Disney klano 🏰 statistika bei valdikliai ⚙️.',
+  text: '📊 mc.craftmc.lt serveryje veikia botas, kuris skaičiuoja žaidėjų /baltop  ir klanų /f top 🏆 statistiką. Pagal šiuos duomenis automatiškai reguliuojama Disney klano 🏰 statistika bei valdikliai ⚙️.',
   time: 'Sistemos žinutė', isAdmin: false
 };
 
@@ -727,7 +723,7 @@ function addMessageToDisplay(text, timeStr, isAdmin) {
 
 addMessageToDisplay(DEFAULT_MSG.text, DEFAULT_MSG.time, DEFAULT_MSG.isAdmin);
 
-// ===== GITHUB API UPDATE =====
+// ===== GITHUB API UPDATE (TIESIOGINIS) =====
 async function updatePriceViaGitHub() {
   const newPrice = parseFloat(document.getElementById('priceInput').value);
   if (isNaN(newPrice) || newPrice <= 0) {
@@ -737,29 +733,59 @@ async function updatePriceViaGitHub() {
 
   const loading = document.getElementById('loadingText');
   const successMsg = document.getElementById('successMsg');
-  const GITHUB_TOKEN = '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';
 
   try {
     loading.classList.add('show');
 
-    const response = await fetch('/api/update-price', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        price: newPrice,
-        token: GITHUB_TOKEN
-      })
-    });
+    // 1. Gauti dabartinį failą iš GitHub
+    const getFileRes = await fetch(
+      `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/index.html?ref=main`,
+      {
+        headers: {
+          'Authorization': `token ${GITHUB_TOKEN}`,
+          'Accept': 'application/vnd.github.v3+json'
+        }
+      }
+    );
 
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error || 'Nepavyko atnaujinti');
+    if (!getFileRes.ok) {
+      throw new Error('Nepavyko gauti failo iš GitHub');
     }
 
-    successMsg.textContent = `✓ Kaina atnaujinta: ${newPrice.toFixed(2)}M`;
+    const fileData = await getFileRes.json();
+    const content = atob(fileData.content);
+    
+    // 2. Pakeisti BASE_PRICE
+    const updatedContent = content.replace(
+      /let BASE_PRICE = [\d.]+;/,
+      `let BASE_PRICE = ${newPrice};`
+    );
+
+    // 3. Įkelti atgal į GitHub
+    const commitRes = await fetch(
+      `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/index.html`,
+      {
+        method: 'PUT',
+        headers: {
+          'Authorization': `token ${GITHUB_TOKEN}`,
+          'Accept': 'application/vnd.github.v3+json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          message: `Update price to ${newPrice}M [auto]`,
+          content: btoa(updatedContent),
+          sha: fileData.sha,
+          branch: 'main'
+        })
+      }
+    );
+
+    if (!commitRes.ok) {
+      const errData = await commitRes.json();
+      throw new Error(errData.message || 'Nepavyko atnaujinti GitHub');
+    }
+
+    successMsg.textContent = `✓ Kaina atnaujinta: ${newPrice.toFixed(2)}M\nGitHub atnaujinta! Svetainė atsinaujins per 1-2 min.`;
     successMsg.style.display = 'block';
     document.getElementById('priceInput').value = '';
     
